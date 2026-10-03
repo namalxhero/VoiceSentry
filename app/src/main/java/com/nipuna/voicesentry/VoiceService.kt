@@ -7,7 +7,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
 import android.media.AudioRecord
+import android.media.MediaPlayer
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.VibrationEffect
@@ -18,6 +20,10 @@ import androidx.core.app.ServiceCompat
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
 import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import java.util.Locale
 import kotlin.math.sqrt
 
@@ -84,7 +90,7 @@ class VoiceService : Service() {
                 sinhalaOk = r != null && r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED
                 ttsReady = true
                 if (!sinhalaOk) {
-                    VoiceState.add("setup", "Sinhala voice missing: Settings > Text-to-speech > Google > install Sinhala", 0f, false)
+                    VoiceState.add("setup", "No Sinhala voice on this phone, using online voice instead", 0f, false)
                 }
             } else if (useGoogle) {
                 try { tts?.shutdown() } catch (_: Exception) {}
@@ -96,12 +102,61 @@ class VoiceService : Service() {
 
     /** Speaks and blocks until finished (the mic is reset afterwards so it never hears itself). */
     private fun speak(text: String) {
-        val t = tts ?: return
-        if (!ttsReady || !sinhalaOk) return
-        t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sentry")
-        Thread.sleep(400)
-        var n = 0
-        while (active && t.isSpeaking && n < 300) { Thread.sleep(100); n++ }
+        val t = tts
+        if (t != null && ttsReady && sinhalaOk) {
+            val r = t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sentry")
+            if (r == TextToSpeech.SUCCESS) {
+                Thread.sleep(400)
+                var n = 0
+                while (active && t.isSpeaking && n < 300) { Thread.sleep(100); n++ }
+                Thread.sleep(500)
+                return
+            }
+        }
+        // Phone has no Sinhala voice: fall back to an online Sinhala voice (needs internet).
+        try {
+            speakOnline(text)
+        } catch (e: Exception) {
+            VoiceState.add("voice", "Could not speak: ${e.message}", 0f, false)
+        }
+    }
+
+    private fun speakOnline(text: String) {
+        val chunks = text.split(Regex("(?<=[.!?।])\\s+")).filter { it.isNotBlank() }
+        for (chunk in chunks) {
+            if (!active) return
+            val q = URLEncoder.encode(chunk.take(180), "UTF-8")
+            val url = URL("https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=si&q=$q")
+            val c = url.openConnection() as HttpURLConnection
+            c.setRequestProperty("User-Agent", "Mozilla/5.0")
+            c.connectTimeout = 8000
+            c.readTimeout = 15000
+            if (c.responseCode !in 200..299) {
+                c.disconnect()
+                throw Exception("online voice HTTP ${c.responseCode}")
+            }
+            val f = File(cacheDir, "say.mp3")
+            c.inputStream.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+            c.disconnect()
+
+            val mp = MediaPlayer()
+            try {
+                mp.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build(),
+                )
+                mp.setDataSource(f.path)
+                mp.prepare()
+                mp.start()
+                Thread.sleep(300)
+                var n = 0
+                while (active && mp.isPlaying && n < 300) { Thread.sleep(100); n++ }
+            } finally {
+                mp.release()
+            }
+        }
         Thread.sleep(500)
     }
 
