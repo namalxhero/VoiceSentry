@@ -17,7 +17,7 @@ import java.util.Locale
  * decides what to do, calls phone tools, and returns a short Sinhala answer to be spoken.
  */
 object Brain {
-    data class Reply(val heard: String, val say: String, val ok: Boolean)
+    data class Reply(val heard: String, val say: String, val ok: Boolean, val more: Boolean = true)
 
     private class ApiError(val code: Int, msg: String) : Exception(msg)
 
@@ -79,14 +79,20 @@ object Brain {
         val now = SimpleDateFormat("EEEE, yyyy-MM-dd HH:mm", Locale.US).format(Date())
         return """You are the voice brain of the owner's rooted Samsung Galaxy A05 (Android 15), like a personal Jarvis with full control of the phone. The owner lives in Sri Lanka and speaks Sinhala (sometimes mixed with English words). Current time: $now.
 You receive the owner's voice as audio. It may start with the wake word (for example "hello"); ignore the wake word.
-Do what the owner asks, completely. Prefer the dedicated tools; use shell for anything else. You can chain many tool calls (use screen_ui to see the screen, then tap).
+You are a full conversational assistant: you can chat, answer questions, explain, translate and help with anything, and you can control the phone completely. Prefer the dedicated tools; use shell for anything else. You can chain many tool calls (use screen_ui to see the screen, then tap).
+TALK TO THE OWNER IN REAL TIME. Everything you write is spoken aloud:
+- Before every tool call, write ONE very short Sinhala sentence in the same message saying what you are doing right now (for example "YouTube open කරනවා."). It is spoken immediately.
+- Tell the owner about everything that happens, including problems and what you will try next.
+- When everything is finished, report the result in one short sentence and then ask what else to do, in Sinhala ("තව මොනවා හරි කරන්න ඕනේද?"), unless the owner is clearly finished.
 Never reveal, read out or ask for the lock-screen PIN.
 Dangerous commands (power off, reboot, recovery, uninstall, delete, calling, sending messages) are guarded: shell first answers NEEDS_CONFIRMATION. Then tell the owner in Sinhala exactly what you are about to do and ask them to confirm. Only if the owner says yes in their NEXT message, call the exact same command again. Never claim you did it before it ran.
-If a tool fails, say so honestly. If you could not understand the audio, ask the owner to repeat.
-Your answer is read aloud: reply in Sinhala (Sinhala script) in one or two short sentences, no markdown, no emoji, no lists. If the owner spoke English, reply in English.
-Your FINAL message must be exactly two lines:
+If you could not understand the audio, ask the owner to repeat.
+Reply in Sinhala (Sinhala script), short sentences, no markdown, no emoji, no lists. If the owner spoke English, reply in English.
+Your FINAL message (the one without tool calls) must be exactly three lines:
 HEARD: <what the owner said, in the language they used>
-SAY: <your spoken reply>"""
+SAY: <your spoken reply>
+MORE: yes or no
+MORE is "no" only when the owner says they are finished (for example "ඉවරයි", "ඕනේ නෑ", "thanks", "bye"); then SAY a short goodbye. Otherwise MORE is "yes"."""
     }
 
     private fun wavBase64(f: FloatArray): String {
@@ -205,7 +211,7 @@ SAY: <your spoken reply>"""
         }
     }
 
-    fun ask(ctx: Context, p: Prefs, audio: FloatArray, score: Float): Reply {
+    fun ask(ctx: Context, p: Prefs, audio: FloatArray, score: Float, onSay: (String) -> Unit = {}): Reply {
         val now = System.currentTimeMillis()
         if (now - lastAt > 5 * 60_000) history.clear()
         lastAt = now
@@ -242,6 +248,10 @@ SAY: <your spoken reply>"""
                 }
                 if (calls.isEmpty()) { finalText = sb.toString(); break }
 
+                // Real-time narration: speak what is about to happen before running the tools.
+                val narration = sb.toString().trim()
+                if (narration.isNotEmpty()) onSay(narration)
+
                 contents.put(content)
                 val responses = JSONArray()
                 for (c in calls) {
@@ -264,14 +274,18 @@ SAY: <your spoken reply>"""
             return Reply("Error: ${e.message}", "", false)
         }
 
-        val m = Regex("HEARD:\\s*(.*?)\\s*SAY:\\s*(.*)", RegexOption.DOT_MATCHES_ALL).find(finalText)
+        val m = Regex(
+            "HEARD:\\s*(.*?)\\s*SAY:\\s*(.*?)\\s*(?:MORE:\\s*(\\w+))?\\s*$",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
+        ).find(finalText.trim())
         val heard = m?.groupValues?.get(1)?.trim() ?: ""
         val say = (m?.groupValues?.get(2) ?: finalText).trim()
+        val more = !(m?.groupValues?.get(3) ?: "yes").equals("no", ignoreCase = true)
 
         history.add(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", heard.ifEmpty { "(voice message)" }))))
         history.add(JSONObject().put("role", "model").put("parts", JSONArray().put(JSONObject().put("text", say.ifEmpty { "ok" }))))
         while (history.size > 12) history.removeAt(0)
 
-        return Reply(heard.ifEmpty { "(voice)" }, say, true)
+        return Reply(heard.ifEmpty { "(voice)" }, say, true, more)
     }
 }

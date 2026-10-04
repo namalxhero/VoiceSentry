@@ -239,7 +239,13 @@ class VoiceService : Service() {
         fun converse(seg: FloatArray, score: Float) {
             VoiceState.status.value = "Thinking…"
             buzz(30)
-            val r = Brain.ask(this@VoiceService, prefs, seg, score)
+            val r = Brain.ask(this@VoiceService, prefs, seg, score) { s ->
+                // Live narration while the AI works.
+                VoiceState.add("…", s, score, true)
+                VoiceState.status.value = "Speaking…"
+                speak(s)
+                VoiceState.status.value = "Thinking…"
+            }
             VoiceState.add(r.heard, if (r.say.isNotBlank()) r.say else "(no reply)", score, r.ok)
             if (r.say.isNotBlank()) {
                 VoiceState.status.value = "Speaking…"
@@ -249,7 +255,7 @@ class VoiceService : Service() {
                 vad.reset()
                 pre.clear()
             }
-            awakeUntil = System.currentTimeMillis() + 15000
+            awakeUntil = if (r.more) System.currentTimeMillis() + 20000 else 0L
             VoiceState.status.value = "Listening"
         }
 
