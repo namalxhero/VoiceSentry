@@ -8,6 +8,8 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaPlayer
 import android.os.IBinder
@@ -51,7 +53,10 @@ class VoiceService : Service() {
         if (active) return START_NOT_STICKY
 
         createChannel()
-        ServiceCompat.startForeground(this, 1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        ServiceCompat.startForeground(
+            this, 1, notification(),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+        )
         active = true
         VoiceState.running.value = true
 
@@ -89,6 +94,15 @@ class VoiceService : Service() {
                 val r = tts?.setLanguage(Locale("si", "LK"))
                 sinhalaOk = r != null && r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED
                 ttsReady = true
+                try {
+                    tts?.setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build(),
+                    )
+                } catch (_: Exception) {}
+                VoiceState.add("voice", "Voice engine: ${tts?.defaultEngine}, Sinhala code=$r, ok=$sinhalaOk", 0f, sinhalaOk)
                 if (!sinhalaOk) {
                     VoiceState.add("setup", "No Sinhala voice on this phone, using online voice instead", 0f, false)
                 }
@@ -101,10 +115,34 @@ class VoiceService : Service() {
     }
 
     /** Speaks and blocks until finished (the mic is reset afterwards so it never hears itself). */
+    private var lastPath = ""
+
     private fun speak(text: String) {
+        val am = getSystemService(AUDIO_SERVICE) as AudioManager
+        if (am.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) {
+            VoiceState.add("voice", "Media volume is 0, turn it up", 0f, false)
+        }
+        val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build(),
+            )
+            .build()
+        try { am.requestAudioFocus(focus) } catch (_: Exception) {}
+        try {
+            speakInner(text)
+        } finally {
+            try { am.abandonAudioFocusRequest(focus) } catch (_: Exception) {}
+        }
+    }
+
+    private fun speakInner(text: String) {
         val t = tts
         if (t != null && ttsReady && sinhalaOk) {
             val r = t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sentry")
+            if (lastPath != "local") { lastPath = "local"; VoiceState.add("voice", "Speaking with phone voice (code $r)", 0f, r == TextToSpeech.SUCCESS) }
             if (r == TextToSpeech.SUCCESS) {
                 Thread.sleep(400)
                 var n = 0
@@ -114,6 +152,7 @@ class VoiceService : Service() {
             }
         }
         // Phone has no Sinhala voice: fall back to an online Sinhala voice (needs internet).
+        if (lastPath != "online") { lastPath = "online"; VoiceState.add("voice", "Speaking with online voice", 0f, true) }
         try {
             speakOnline(text)
         } catch (e: Exception) {
