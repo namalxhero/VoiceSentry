@@ -41,6 +41,10 @@ class Prefs(ctx: Context) {
         get() = sp.getString("gmodel", "gemini-2.5-flash") ?: "gemini-2.5-flash"
         set(v) { sp.edit().putString("gmodel", v.trim()).apply() }
 
+    var voicePitch: Float
+        get() = sp.getFloat("pitch", 0.8f)
+        set(v) { sp.edit().putFloat("pitch", v).apply() }
+
     var voiceprint: FloatArray?
         get() = sp.getString("vp", null)
             ?.split(",")

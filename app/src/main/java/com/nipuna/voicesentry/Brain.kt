@@ -45,7 +45,7 @@ object Brain {
 
     // Never allowed: could brick/wipe the phone, remove the lock, or leak this app's PIN.
     private val BLOCK = Regex(
-        "(\\bdd\\b|mkfs|factory.?reset|\\bwipe\\b|resetprop|locksettings|magisk|voicesentry|/data/data|shared_prefs|\\bsu\\b)",
+        "(\\bdd\\b|mkfs|factory.?reset|\\bwipe\\b|resetprop|locksettings|magisk|voicesentry|/data/data|shared_prefs)",
         RegexOption.IGNORE_CASE,
     )
     private val ROOT_RM = Regex(
@@ -70,7 +70,7 @@ object Brain {
 {"name":"open_app","description":"Open an installed app by its name, for example YouTube, WhatsApp, Camera, Settings.",
  "parameters":{"type":"OBJECT","properties":{"app_name":{"type":"STRING"}},"required":["app_name"]}},
 {"name":"screen_ui","description":"Read what is on the screen right now: a list of texts and buttons with the x,y centre to tap. Use it to operate any app (find the Send button, tap it with shell: input tap X Y)."},
-{"name":"shell","description":"Run any Android shell command as root and get its output. Use it for everything the other tools cannot do. Examples: power off = 'reboot -p'; restart = 'reboot'; recovery = 'reboot recovery'; bootloader = 'reboot bootloader'; uninstall app = 'pm uninstall PACKAGE' (find it with 'pm list packages | grep NAME'; system apps: 'pm uninstall -k --user 0 PACKAGE'); call = 'am start -a android.intent.action.CALL -d tel:NUMBER'; SMS = 'am start -a android.intent.action.SENDTO -d sms:NUMBER --es sms_body TEXT' then screen_ui and tap Send; tap = 'input tap X Y'; type English text = 'input text hello%sworld' (Sinhala cannot be typed this way); battery = 'dumpsys battery'. Dangerous commands answer NEEDS_CONFIRMATION first.",
+{"name":"shell","description":"Run any Android shell command and get its output (it already runs as root, never prefix it with su). Use it for everything the other tools cannot do. Examples: power off = 'reboot -p'; restart = 'reboot'; recovery = 'reboot recovery'; bootloader = 'reboot bootloader'; uninstall app = 'pm uninstall PACKAGE' (find it with 'pm list packages | grep NAME'; system apps: 'pm uninstall -k --user 0 PACKAGE'); call = 'am start -a android.intent.action.CALL -d tel:NUMBER'; SMS = 'am start -a android.intent.action.SENDTO -d sms:NUMBER --es sms_body TEXT' then screen_ui and tap Send; tap = 'input tap X Y'; type English text = 'input text hello%sworld' (Sinhala cannot be typed this way); battery = 'dumpsys battery'. Dangerous commands answer NEEDS_CONFIRMATION first.",
  "parameters":{"type":"OBJECT","properties":{"command":{"type":"STRING"}},"required":["command"]}}
 ]}]""",
     )
@@ -144,7 +144,8 @@ MORE is "no" only when the owner says they are finished (for example "ඉවර�
     }
 
     private fun shell(cmd0: String): String {
-        val cmd = cmd0.trim()
+        // The shell is already root: strip a leading "su -c" and wrapping quotes the model may add.
+        val cmd = cmd0.trim().replace(Regex("^su(\\s+-c)?\\s+"), "").trim().trim('\'', '"').trim()
         if (cmd.isEmpty()) return "empty command"
         if (BLOCK.containsMatchIn(cmd) || ROOT_RM.containsMatchIn(cmd)) {
             return "REFUSED: this command is permanently blocked (it could wipe or brick the phone, remove the lock, or expose the PIN). Tell the owner to do it manually."

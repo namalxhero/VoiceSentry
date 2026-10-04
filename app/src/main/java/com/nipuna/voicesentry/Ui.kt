@@ -258,10 +258,11 @@ private fun EnrollCard(
     val wake = prefs.wakeWord
     val prompts = listOf(
         "$wake, unlock my phone",
-        "$wake, open YouTube",
-        "$wake, lock the screen",
-        "$wake, turn on the wifi",
-        "$wake, volume up",
+        "$wake, ෆෝන් එක අන්ලොක් කරන්න",
+        "$wake, YouTube open කරන්න",
+        "$wake, අද දවසේ කාලගුණය මොකක්ද?",
+        "$wake, ඊළඟ ගීතය දාන්න",
+        "$wake, volume එක වැඩි කරන්න",
     )
 
     GlassCard("Your voice") {
@@ -438,6 +439,7 @@ private fun AssistantCard(prefs: Prefs) {
     var on by remember { mutableStateOf(prefs.assistantOn) }
     var key by remember { mutableStateOf(prefs.geminiKey) }
     var model by remember { mutableStateOf(prefs.geminiModel) }
+    var pitch by remember { mutableFloatStateOf(prefs.voicePitch) }
 
     GlassCard("AI assistant (සිංහල)") {
         ToggleRow("Talk to the AI", "After the wake word, ask anything in Sinhala. It answers by voice and controls the phone.", on) {
@@ -459,6 +461,10 @@ private fun AssistantCard(prefs: Prefs) {
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+        Column {
+            Text("Voice pitch: ${(pitch * 100).toInt()}%  (lower = deeper, more male)", color = Color.White, fontSize = 14.sp)
+            Slider(value = pitch, onValueChange = { pitch = it; prefs.voicePitch = it }, valueRange = 0.5f..1.2f)
+        }
         Text(
             "Needs internet and \"Require wake word\" on. Only after your voice is verified, that audio is sent to Google Gemini.",
             color = Dim, fontSize = 12.sp,

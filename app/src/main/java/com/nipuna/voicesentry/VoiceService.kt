@@ -12,6 +12,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaPlayer
+import android.media.PlaybackParams
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.VibrationEffect
@@ -141,6 +142,7 @@ class VoiceService : Service() {
     private fun speakInner(text: String) {
         val t = tts
         if (t != null && ttsReady && sinhalaOk) {
+            try { t.setPitch(Prefs(this).voicePitch) } catch (_: Exception) {}
             val r = t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sentry")
             if (lastPath != "local") { lastPath = "local"; VoiceState.add("voice", "Speaking with phone voice (code $r)", 0f, r == TextToSpeech.SUCCESS) }
             if (r == TextToSpeech.SUCCESS) {
@@ -187,6 +189,9 @@ class VoiceService : Service() {
                         .build(),
                 )
                 mp.setDataSource(f.path)
+                try {
+                    mp.playbackParams = PlaybackParams().setPitch(Prefs(this).voicePitch).setSpeed(1.0f)
+                } catch (_: Exception) {}
                 mp.prepare()
                 mp.start()
                 Thread.sleep(300)
